@@ -1,0 +1,172 @@
+parameters: 
+  - name: environment
+    default: "atest"
+  - name: azureSubscription
+    default: "SDSSQ00 SQL Hotel Test service connection"
+  - name: storage_account_name
+    default: "stosqlmiatestmanagement"
+  - name: container_name
+    default: "terraform"
+  - name: resource_group_name
+    default: "rg-sqlmi-atest-management"
+  - name: location
+    default: "west europe"
+  - name: key
+    default: "terraform.tfstate"
+  - name: container_key
+    default: $(access_key)
+  - name: working_directory
+    default: "terraform_sqlmi"
+
+
+stages:
+ - stage: CreateStorageAccount
+   jobs:
+    - job: CreateStorageAccount
+      steps:
+      - checkout: self
+      - task: AzureCLI@2
+        displayName: 'Create Storage Account'
+        inputs:
+             azuresubscription: ${{parameters.azureSubscription}}
+             scripttype: 'ps'
+             scriptlocation: 'inlinescript'
+             inlinescript: |
+              az storage account create --name ${{parameters.storage_account_name}} --resource-group ${{parameters.resource_group_name}} --location '${{parameters.location}}' --sku standard_zrs --kind storagev2 --min-tls-version TLS1_2 --allow-blob-public-access false
+
+ - stage: CreateStorageContainer
+   jobs:
+    - job: CreateStorageContainer
+      steps:
+      - checkout: self
+      - task: azurecli@2
+        displayName: 'Create Storage Container'
+        inputs:
+             azuresubscription: ${{parameters.azureSubscription}}
+             scripttype: 'ps'
+             scriptlocation: 'inlinescript'
+             inlinescript:
+              az storage container create --name ${{parameters.container_name}} --account-name ${{parameters.storage_account_name}}
+
+ - stage: TerraformPrepare
+   jobs:
+    - job: TerraformPrepare
+      steps:
+      - checkout: self
+      - task: AzureCLI@2
+        displayName: List Storage Account keys
+        inputs:
+             azureSubscription:  ${{parameters.azureSubscription}}
+             scriptType: 'ps'
+             scriptLocation: 'inlineScript'
+             inlineScript: 
+              az storage account keys list -g ${{parameters.resource_group_name}} -n ${{parameters.storage_account_name}}
+             powerShellErrorActionPreference: 'continue'
+             addSpnToEnvironment: true
+
+      - task: TerraformInstaller@0
+        displayName: Terraform Install
+        inputs:
+             terraformVersion: 'latest'
+
+      - task: PowerShell@2
+        displayName: 'Debug'
+        inputs:
+             targetType: 'inline'
+             script: 
+              Get-ChildItem -Path '$(System.DefaultWorkingDirectory)/${{parameters.working_directory}}' -recurse
+ 
+      - task: TerraformTaskV4@4
+        displayName: 'Terraform Init'
+        inputs:
+             provider: 'azurerm'
+             command: 'init'
+             workingDirectory: '$(System.DefaultWorkingDirectory)/${{parameters.working_directory}}'
+             commandOptions: '-backend-config="env/${{parameters.environment}}/backend-config.tfvars"'
+#             commandOptions: '-reconfigure'
+             backendServiceArm:  ${{parameters.azureSubscription}}
+             backendAzureRmResourceGroupName:  ${{parameters. resource_group_name}}
+             backendAzureRmStorageAccountName:  ${{parameters.storage_account_name}}
+             backendAzureRmContainerName: ${{parameters.container_name}}
+             backendAzureRmKey: ${{parameters.key}}
+
+      - task: TerraformTaskV4@4
+        displayName: "Validate"
+        inputs:
+             workingDirectory: "$(System.DefaultWorkingDirectory)/${{parameters.working_directory}}"
+             provider: "azurerm"
+             command: "validate"
+             backendServiceArm:  ${{parameters.azureSubscription}}
+             backendAzureRmResourceGroupName:  ${{parameters. resource_group_name}}
+             backendAzureRmStorageAccountName:  ${{parameters.storage_account_name}}
+             backendAzureRmContainerName: ${{parameters.container_name}}
+             backendAzureRmKey: ${{parameters.key}}
+
+      - task: TerraformTaskV4@4
+        displayName: 'Terraform plan'
+        inputs:
+             workingDirectory: "$(System.DefaultWorkingDirectory)/${{parameters.working_directory}}"
+             provider: 'azurerm'
+             command: 'plan'
+             commandOptions: '-var-file="env/${{parameters.environment}}/variables.tfvars" -out="${{parameters.environment}}.tfplan"'
+             environmentServiceNameAzureRM:  ${{parameters.azureSubscription}}
+             backendServiceArm:  ${{parameters.azureSubscription}}
+             backendAzureRmResourceGroupName:  ${{parameters. resource_group_name}}
+             backendAzureRmStorageAccountName:  ${{parameters.storage_account_name}}
+             backendAzureRmContainerName: ${{parameters.container_name}}
+             backendAzureRmKey: ${{parameters.key}}
+
+      - task: AddBuildTag@1
+        inputs:
+          tag: '${{parameters.environment}}'
+
+      - task: PublishBuildArtifacts@1
+        inputs:
+          PathtoPublish: '$(System.DefaultWorkingDirectory)/${{parameters.working_directory}}/${{parameters.environment}}.tfplan'
+          ArtifactName: 'tfplan'
+          publishLocation: 'Container'
+      
+
+ - stage: TerraformApply
+   dependsOn: TerraformPrepare
+   jobs:
+    - job: TerraformApply
+      steps:
+      - checkout: none
+      # We need to install terraform here again.
+      - task: TerraformInstaller@0
+        displayName: Terraform Install
+        inputs:
+             terraformVersion: 'latest'
+
+      - task: DownloadPipelineArtifact@2
+        inputs:
+          buildType: 'current'
+          artifactName: 'tfplan'
+          itemPattern: '**'
+          targetPath: '$(System.DefaultWorkingDirectory)/${{parameters.working_directory}}'
+
+      - task: TerraformTaskV4@4
+        displayName: 'Terraform apply'
+        timeoutInMinutes: 360
+        inputs:
+             workingDirectory: "$(System.DefaultWorkingDirectory)/${{parameters.working_directory}}"
+             provider: 'azurerm'
+             command: 'apply'
+             commandOptions: '-auto-approve "${{parameters.environment}}.tfplan"'
+             environmentServiceNameAzureRM:  ${{parameters.azureSubscription}}
+             backendServiceArm:  ${{parameters.azureSubscription}}
+             backendAzureRmResourceGroupName:  ${{parameters. resource_group_name}}
+             backendAzureRmStorageAccountName:  ${{parameters.storage_account_name}}
+             backendAzureRmContainerName: ${{parameters.container_name}}
+             backendAzureRmKey: ${{parameters.key}}
+
+
+
+
+
+
+
+
+
+
