@@ -17,11 +17,14 @@ Terrafom local commands:
 
 az storage account keys list -g rg-sqlmi-test-management-terraform -n stoatestmanage
 
-cd C:\Downloads\terraform_training
+cd C:\Downloads\terraform
 
 terraform init -backend-config="env\atest\backend-config.tfvars"
+
 terraform plan -var-file="env\atest\variables.tfvars" -out="atest.tfplan"
+
 terraform apply "atest.tfplan"
+
 #terraform destroy
 
 cd C:\Downloads\terraform_mgmt
