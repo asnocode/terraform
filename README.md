@@ -1,6 +1,6 @@
 # terraform
 
-Terraform:
+Terraform Azure IaC:
 1. Azure DevOps Pipeline
 2. Storage Accounts
 3. Key Vault
@@ -13,7 +13,7 @@ Terraform:
 10. Automation account
 11. Alerts
 
-Terrafom local commands:
+Terrafom basic commands:
 
 az storage account keys list -g rg-sqlmi-test-management-terraform -n stoatestmanage
 
