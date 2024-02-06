@@ -27,6 +27,9 @@ terraform apply "atest.tfplan"
 cd C:\Downloads\terraform_mgmt
 
 terraform init
+
 terraform plan -out="terraform_mgmt.tfplan"
+
 terraform apply "terraform_mgmt.tfplan"
+
 #terraform destroy
